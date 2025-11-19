@@ -69,7 +69,6 @@ app.post('/api/init', async (req: Request, res: Response) => {
           success: true,
           status: 'ready',
           phone: existing.phone,
-          qrCode: null,
           message: 'Session already connected'
         });
       }
@@ -79,7 +78,6 @@ app.post('/api/init', async (req: Request, res: Response) => {
           success: true,
           status: 'qr_ready',
           qrCode: existing.qr,
-          phone: null,
           message: 'QR code available'
         });
       }
@@ -191,8 +189,6 @@ app.get('/api/status/:instanceName', (req: Request, res: Response) => {
       return res.status(404).json({
         success: false,
         status: 'disconnected',
-        phone: null,
-        qrCode: null,
         message: 'Instance not found'
       });
     }
@@ -243,10 +239,22 @@ app.post('/api/send-message', async (req: Request, res: Response) => {
 
     if (mediaUrl) {
       // Send media message
-      sentMessage = await session.socket.sendMessage(formattedNumber, {
-        [mediaType === 'image' ? 'image' : mediaType === 'video' ? 'video' : 'document']: { url: mediaUrl },
-        caption: message
-      });
+      if (mediaType === 'image') {
+        sentMessage = await session.socket.sendMessage(formattedNumber, {
+          image: { url: mediaUrl },
+          caption: message
+        });
+      } else if (mediaType === 'video') {
+        sentMessage = await session.socket.sendMessage(formattedNumber, {
+          video: { url: mediaUrl },
+          caption: message
+        });
+      } else {
+        sentMessage = await session.socket.sendMessage(formattedNumber, {
+          document: { url: mediaUrl },
+          caption: message
+        });
+      }
     } else {
       // Send text message
       sentMessage = await session.socket.sendMessage(formattedNumber, {
