@@ -1,186 +1,310 @@
-// server.ts
-import { default as makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, WASocket } from '@whiskeysockets/baileys';
 import express, { Request, Response, NextFunction } from 'express';
-import QRCode from 'qrcode';
+import makeWASocket, { 
+  DisconnectReason, 
+  useMultiFileAuthState,
+  WASocket,
+  BaileysEventMap,
+  makeCacheableSignalKeyStore
+} from '@whiskeysockets/baileys';
+import qrcode from 'qrcode';
 import pino from 'pino';
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
-const API_KEY = process.env.API_KEY;
+const API_KEY = process.env.API_KEY || 'your-secret-api-key';
 
-interface Session {
-  socket: WASocket;
-  state: any;
-}
+// Store active sessions
+const sessions = new Map<string, { socket: WASocket; qr: string | null; status: string; phone: string | null }>();
 
-const sessions = new Map<string, Session>();
-const qrCodes = new Map<string, string>();
+// Logger
+const logger = pino({ level: 'info' });
 
-// Middleware de autenticação
-app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.path === '/health') return next();
-  
+// API Key middleware
+const validateApiKey = (req: Request, res: Response, next: NextFunction) => {
   const apiKey = req.headers['x-api-key'];
-  if (!apiKey || apiKey !== API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-});
-
-// Health check
-app.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok' });
-});
-
-// Inicializar conexão
-app.post('/api/init', async (req: Request, res: Response) => {
-  const { instanceName } = req.body;
   
-  if (!instanceName) {
-    return res.status(400).json({ error: 'instanceName is required' });
+  if (!apiKey || apiKey !== API_KEY) {
+    return res.status(401).json({ 
+      success: false,
+      error: 'Unauthorized - Invalid API Key' 
+    });
   }
+  
+  next();
+};
 
+app.use(validateApiKey);
+
+// Health check endpoint
+app.get('/health', (req: Request, res: Response) => {
+  res.json({ 
+    success: true,
+    status: 'healthy',
+    timestamp: new Date().toISOString() 
+  });
+});
+
+// Initialize WhatsApp session
+app.post('/api/init', async (req: Request, res: Response) => {
   try {
+    const { instanceName } = req.body;
+    
+    if (!instanceName) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'instanceName is required' 
+      });
+    }
+
+    logger.info(`[${instanceName}] Initializing session`);
+
+    // Check if session already exists
     if (sessions.has(instanceName)) {
-      const session = sessions.get(instanceName);
-      if (session?.socket) {
-        return res.json({ 
-          success: true, 
-          message: 'Instance already exists',
-          qr: qrCodes.get(instanceName)
+      const existing = sessions.get(instanceName)!;
+      
+      if (existing.status === 'ready') {
+        return res.json({
+          success: true,
+          status: 'ready',
+          phone: existing.phone,
+          qrCode: null,
+          message: 'Session already connected'
+        });
+      }
+      
+      if (existing.qr) {
+        return res.json({
+          success: true,
+          status: 'qr_ready',
+          qrCode: existing.qr,
+          phone: null,
+          message: 'QR code available'
         });
       }
     }
 
-    const { state, saveCreds } = await useMultiFileAuthState(`./auth/${instanceName}`);
-    const { version } = await fetchLatestBaileysVersion();
-
-    const socket = makeWASocket({
-      version,
+    // Create new session
+    const { state, saveCreds } = await useMultiFileAuthState(`./auth_info_baileys/${instanceName}`);
+    
+    const sock = makeWASocket({
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
       printQRInTerminal: false,
-      auth: state,
-      logger: pino({ level: 'silent' }),
+      logger,
     });
 
-    socket.ev.on('creds.update', saveCreds);
+    let qrCodeData: string | null = null;
+    let sessionStatus = 'connecting';
+    let phoneNumber: string | null = null;
 
-    socket.ev.on('connection.update', (update: any) => {
+    // QR Code handler
+    sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        QRCode.toDataURL(qr, (err, url) => {
-          if (!err) {
-            qrCodes.set(instanceName, url);
-            console.log(`QR Code generated for ${instanceName}`);
+        try {
+          qrCodeData = await qrcode.toDataURL(qr);
+          sessionStatus = 'qr_ready';
+          
+          const session = sessions.get(instanceName);
+          if (session) {
+            session.qr = qrCodeData;
+            session.status = sessionStatus;
           }
-        });
+          
+          logger.info(`[${instanceName}] QR code generated`);
+        } catch (error) {
+          logger.error(`[${instanceName}] Error generating QR code:`, error);
+        }
       }
 
       if (connection === 'close') {
-        const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-        console.log(`Connection closed for ${instanceName}, reconnect:`, shouldReconnect);
+        const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
         
-        if (shouldReconnect) {
-          setTimeout(() => {
-            if (sessions.has(instanceName)) {
-              sessions.delete(instanceName);
-            }
-          }, 5000);
-        } else {
+        logger.info(`[${instanceName}] Connection closed. Reconnect: ${shouldReconnect}`);
+        
+        if (!shouldReconnect) {
           sessions.delete(instanceName);
-          qrCodes.delete(instanceName);
+          sessionStatus = 'disconnected';
         }
       } else if (connection === 'open') {
-        console.log(`Connected successfully for ${instanceName}`);
-        qrCodes.delete(instanceName);
+        sessionStatus = 'ready';
+        phoneNumber = sock.user?.id.split(':')[0] || null;
+        qrCodeData = null;
+        
+        const session = sessions.get(instanceName);
+        if (session) {
+          session.status = sessionStatus;
+          session.phone = phoneNumber;
+          session.qr = null;
+        }
+        
+        logger.info(`[${instanceName}] Connected successfully. Phone: ${phoneNumber}`);
       }
     });
 
-    sessions.set(instanceName, { socket, state });
+    // Save credentials on update
+    sock.ev.on('creds.update', saveCreds);
 
-    setTimeout(() => {
-      const qr = qrCodes.get(instanceName);
-      res.json({ 
-        success: true, 
-        qr: qr || null,
-        message: qr ? 'QR code generated' : 'Waiting for QR code...'
-      });
-    }, 2000);
+    // Store session
+    sessions.set(instanceName, {
+      socket: sock,
+      qr: qrCodeData,
+      status: sessionStatus,
+      phone: phoneNumber
+    });
 
-  } catch (error) {
-    console.error('Init error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to initialize';
-    res.status(500).json({ error: errorMessage });
-  }
-});
+    // Wait a bit for QR code generation
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-// Verificar status
-app.get('/api/status/:instanceName', async (req: Request, res: Response) => {
-  const { instanceName } = req.params;
+    const session = sessions.get(instanceName)!;
+    
+    res.json({
+      success: true,
+      status: session.status,
+      qrCode: session.qr,
+      phone: session.phone,
+      message: session.qr ? 'QR code generated' : 'Connecting...'
+    });
 
-  if (!sessions.has(instanceName)) {
-    return res.status(404).json({ 
+  } catch (error: any) {
+    logger.error('Init error:', error);
+    res.status(500).json({ 
       success: false,
-      status: 'disconnected',
-      message: 'Instance not found'
+      error: error.message || 'Failed to initialize session' 
     });
   }
-
-  const session = sessions.get(instanceName);
-  const qr = qrCodes.get(instanceName);
-
-  res.json({ 
-    success: true,
-    status: session?.socket ? 'connected' : 'disconnected',
-    qr: qr || null
-  });
 });
 
-// Enviar mensagem
-app.post('/api/send-message', async (req: Request, res: Response) => {
-  const { instanceName, to, message, mediaUrl } = req.body;
-
-  if (!instanceName || !to || !message) {
-    return res.status(400).json({ error: 'instanceName, to, and message are required' });
-  }
-
-  const session = sessions.get(instanceName);
-  if (!session || !session.socket) {
-    return res.status(404).json({ error: 'Instance not connected' });
-  }
-
+// Check session status
+app.get('/api/status/:instanceName', (req: Request, res: Response) => {
   try {
-    const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+    const { instanceName } = req.params;
     
-    await session.socket.sendMessage(jid, { text: message });
+    const session = sessions.get(instanceName);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        status: 'disconnected',
+        phone: null,
+        qrCode: null,
+        message: 'Instance not found'
+      });
+    }
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
+      status: session.status,
+      phone: session.phone,
+      qrCode: session.qr,
+      message: `Session status: ${session.status}`
+    });
+
+  } catch (error: any) {
+    logger.error('Status check error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || 'Failed to check status' 
+    });
+  }
+});
+
+// Send message
+app.post('/api/send-message', async (req: Request, res: Response) => {
+  try {
+    const { instanceName, phoneNumber, message, mediaUrl, mediaType } = req.body;
+
+    if (!instanceName || !phoneNumber || !message) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'instanceName, phoneNumber and message are required' 
+      });
+    }
+
+    const session = sessions.get(instanceName);
+    
+    if (!session || session.status !== 'ready') {
+      return res.status(400).json({
+        success: false,
+        error: 'Session not connected'
+      });
+    }
+
+    const formattedNumber = phoneNumber.includes('@s.whatsapp.net') 
+      ? phoneNumber 
+      : `${phoneNumber}@s.whatsapp.net`;
+
+    let sentMessage;
+
+    if (mediaUrl) {
+      // Send media message
+      sentMessage = await session.socket.sendMessage(formattedNumber, {
+        [mediaType === 'image' ? 'image' : mediaType === 'video' ? 'video' : 'document']: { url: mediaUrl },
+        caption: message
+      });
+    } else {
+      // Send text message
+      sentMessage = await session.socket.sendMessage(formattedNumber, {
+        text: message
+      });
+    }
+
+    logger.info(`[${instanceName}] Message sent to ${phoneNumber}`);
+
+    res.json({
+      success: true,
+      messageId: sentMessage?.key?.id,
       message: 'Message sent successfully'
     });
-  } catch (error) {
-    console.error('Send message error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
-    res.status(500).json({ error: errorMessage });
+
+  } catch (error: any) {
+    logger.error('Send message error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || 'Failed to send message' 
+    });
   }
 });
 
-// Desconectar
+// Disconnect session
 app.post('/api/disconnect/:instanceName', async (req: Request, res: Response) => {
-  const { instanceName } = req.params;
+  try {
+    const { instanceName } = req.params;
+    
+    const session = sessions.get(instanceName);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Instance not found'
+      });
+    }
 
-  const session = sessions.get(instanceName);
-  if (session && session.socket) {
     await session.socket.logout();
     sessions.delete(instanceName);
-    qrCodes.delete(instanceName);
-  }
+    
+    logger.info(`[${instanceName}] Session disconnected`);
 
-  res.json({ success: true, message: 'Disconnected successfully' });
+    res.json({
+      success: true,
+      status: 'disconnected',
+      message: 'Session disconnected successfully'
+    });
+
+  } catch (error: any) {
+    logger.error('Disconnect error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message || 'Failed to disconnect session' 
+    });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Baileys server running on port ${PORT}`);
+  logger.info(`Baileys WhatsApp Server running on port ${PORT}`);
 });
