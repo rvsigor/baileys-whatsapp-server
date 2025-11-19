@@ -252,7 +252,8 @@ app.post('/api/send-message', async (req: Request, res: Response) => {
       } else {
         sentMessage = await session.socket.sendMessage(formattedNumber, {
           document: { url: mediaUrl },
-          caption: message
+          mimetype: 'application/pdf',
+          fileName: 'document.pdf'
         });
       }
     } else {
