@@ -22,7 +22,8 @@ Servidor Node.js usando Baileys para integração com WhatsApp Web.
 - Adicionar variáveis de ambiente do `.env.example`
 
 ## 🔧 Variáveis de Ambiente Necessárias
-API_KEY=seu_api_key_forte MONGODB_URI=mongodb+srv://...
+API_KEY=seu_api_key_forte
+MONGODB_URI=mongodb+srv://...
 REDIS_URL=redis://...
 WEBHOOK_URL=https://seu-supabase.functions.v1/whatsapp-webhook
 WEBHOOK_SECRET=seu_secret
