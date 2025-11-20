@@ -5,16 +5,15 @@ import { InstanceModel } from '../database/mongo';
 
 const router = express.Router();
 
-/**
- * POST /instance/start
- * body: { instanceId: string }
- */
+// POST /instance/start
 router.post(
   '/start',
   body('instanceId').isString().trim().notEmpty(),
   async (req: Request, res: Response) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
 
     const { instanceId } = req.body;
     try {
@@ -25,13 +24,14 @@ router.post(
         { upsert: true }
       );
       return res.json({ ok: true, instanceId });
-    } catch (err) {
-      console.error(err);
+    } catch (error: any) {
+      console.error('Erro ao iniciar instância:', error);
       return res.status(500).json({ error: 'failed to start instance' });
     }
   }
 );
 
+// GET /instance/status/:instanceId
 router.get(
   '/status/:instanceId',
   async (req: Request, res: Response) => {

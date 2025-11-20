@@ -1,14 +1,28 @@
 import mongoose from 'mongoose';
 import { config } from '../config/environment';
+import pino from 'pino';
+
+const logger = pino({ level: config.logLevel });
 
 export async function connectMongo(): Promise<void> {
-  await mongoose.connect(config.mongoUri, {
-    dbName: 'baileys'
-  });
-  console.log('✅ MongoDB connected');
+  if (!config.mongoUri) {
+    logger.error('MONGODB_URI não está definida');
+    throw new Error('MONGODB_URI não está definida');
+  }
+
+  try {
+    await mongoose.connect(config.mongoUri, {
+      // se quiser, você pode passar opções extras aqui
+      // exemplo: useNewUrlParser, useUnifiedTopology — mas com Mongoose recente não é necessário
+    });
+    logger.info('✅ MongoDB conectado com sucesso');
+  } catch (error: any) {
+    logger.error('❌ Erro ao conectar no MongoDB:', error);
+    throw error;
+  }
 }
 
-// Exemplo de modelo
+// Modelo de instância (session)
 import { Schema, model, Document } from 'mongoose';
 
 export interface InstanceDoc extends Document {

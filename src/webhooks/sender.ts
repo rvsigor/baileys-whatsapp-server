@@ -1,31 +1,14 @@
 import axios from 'axios';
 import { config } from '../config/environment';
-import pino from 'pino';
 
-const logger = pino();
-
-export async function sendWebhook(event: string, instanceId: string, data: any) {
-  if (!config.webhookUrl) {
-    logger.warn('Webhook URL not configured, skipping webhook');
-    return;
-  }
-
+export async function sendWebhook(payload: any): Promise<void> {
+  if (!config.webhookUrl) return;
   try {
-    await axios.post(config.webhookUrl, {
-      event,
-      instance: instanceId,
-      data,
-      timestamp: new Date().toISOString()
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Webhook-Secret': config.webhookSecret
-      },
-      timeout: 10000
+    await axios.post(config.webhookUrl, payload, {
+      timeout: 5000
+      // Se tiver webhookSecret, você pode assinar o payload e adicionar header aqui
     });
-    
-    logger.info(`Webhook sent: ${event} for ${instanceId}`);
-  } catch (error: any) {
-    logger.error(`Webhook failed: ${error.message}`);
+  } catch (err: any) {
+    console.error('Erro ao enviar webhook:', err);
   }
 }

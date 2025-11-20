@@ -9,7 +9,9 @@ import { connectRedis } from './redis/cache';
 import instanceRoutes from './routes/instance';
 import messagesRoutes from './routes/messages';
 import healthRoutes from './routes/health';
+import pino from 'pino';
 
+const logger = pino({ level: config.logLevel });
 const app = express();
 
 app.use(helmet());
@@ -23,7 +25,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// API key middleware com tipos explícitos
+// Autenticação simples via API Key
 app.use((req: Request, res: Response, next: NextFunction) => {
   const key = req.headers['x-api-key'] || req.query.api_key;
   if (String(key) !== config.apiKey) {
@@ -32,21 +34,21 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// routes
 app.use('/instance', instanceRoutes);
 app.use('/messages', messagesRoutes);
 app.use('/health', healthRoutes);
 
 async function startServer(): Promise<void> {
-  await connectMongo();
-  await connectRedis();
-
-  app.listen(config.port, () => {
-    console.log(`Server running on port ${config.port}`);
-  });
+  try {
+    await connectMongo();
+    await connectRedis();
+    app.listen(config.port, () => {
+      logger.info(`Servidor rodando na porta ${config.port}`);
+    });
+  } catch (error: any) {
+    logger.error('Erro na inicialização:', error);
+    process.exit(1);
+  }
 }
 
-startServer().catch(err => {
-  console.error('Startup error:', err);
-  process.exit(1);
-});
+startServer();

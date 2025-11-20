@@ -3,11 +3,11 @@ dotenv.config();
 
 export const config = {
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
-  mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/baileys',
+  mongoUri: process.env.MONGODB_URI || '',   // variável ajustada
   redisUrl: process.env.REDIS_URL || '',
   apiKey: process.env.API_KEY || '',
   webhookUrl: process.env.WEBHOOK_URL || '',
-  webhookSecret: process.env.WEBHOOK_SECRET || '', // adicionado
+  webhookSecret: process.env.WEBHOOK_SECRET || '',
   rateLimitWindowMs: process.env.RATE_LIMIT_WINDOW_MS
     ? Number(process.env.RATE_LIMIT_WINDOW_MS)
     : 60000,

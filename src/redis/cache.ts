@@ -8,17 +8,17 @@ let redisClient: RedisClientType | null = null;
 
 export async function connectRedis(): Promise<void> {
   if (!config.redisUrl) {
-    logger.warn('⚠️ Redis URL not configured, skipping Redis connection');
+    logger.warn('⚠️ Redis URL não configurada, pulando conexão com Redis');
     return;
   }
 
   try {
     redisClient = createClient({ url: config.redisUrl });
-    redisClient.on('error', (err: Error) => logger.error('Redis error:', err));
+    redisClient.on('error', (err: Error) => logger.error('Erro no Redis:', err));
     await redisClient.connect();
-    logger.info('✅ Redis connected');
-  } catch (error) {
-    logger.error('❌ Redis connection failed:', error);
+    logger.info('✅ Redis conectado');
+  } catch (error: any) {
+    logger.error('❌ Falha ao conectar no Redis:', error);
     redisClient = null;
   }
 }

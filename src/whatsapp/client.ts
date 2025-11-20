@@ -2,9 +2,7 @@ import {
   makeWASocket,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
-  DisconnectReason,
   Browsers,
-  AuthenticationState,
   WAVersion
 } from '@whiskeysockets/baileys';
 import path from 'path';
@@ -19,11 +17,11 @@ interface WhatsAppClient {
   sock: ReturnType<typeof makeWASocket> | null;
 }
 
-const clients: Map<string, WhatsAppClient> = new Map();
+const clients = new Map<string, WhatsAppClient>();
 
 export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAppClient> {
   if (clients.has(instanceId)) {
-    logger.info({ instanceId }, 'Instance already started');
+    logger.info({ instanceId }, 'Instância já iniciada');
     return clients.get(instanceId)!;
   }
 
@@ -31,9 +29,9 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 2304, 10] }));
-
-  // garante que a versão tenha o tipo correto
-  const waVersion: WAVersion = Array.isArray(version) ? (version as [number, number, number]) : version;
+  const waVersion: WAVersion = Array.isArray(version)
+    ? (version as [number, number, number])
+    : version;
 
   const sock = makeWASocket({
     version: waVersion,
@@ -44,11 +42,13 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update as any;
+  sock.ev.on('connection.update', async (update: any) => {
+    const { connection, lastDisconnect, qr } = update;
     logger.info({ update }, 'connection.update');
 
-    if (qr) await cacheQR(instanceId, qr);
+    if (qr) {
+      await cacheQR(instanceId, qr);
+    }
 
     if (connection === 'open') {
       await InstanceModel.updateOne(
@@ -65,20 +65,19 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
       );
       await cacheConnectionStatus(instanceId, 'disconnected');
       const reason = (lastDisconnect?.error as any)?.output?.statusCode;
-      logger.warn({ reason }, 'connection closed');
+      logger.warn({ reason }, 'Conexão fechada');
     }
   });
 
-  import('../whatsapp/messageHandler').then(module => {
+  import('./messageHandler').then(module => {
     module.attachMessageHandlers(sock);
   });
 
-  const client: WhatsAppClient = { instanceId, sock };
+  const client = { instanceId, sock };
   clients.set(instanceId, client);
-
   return client;
 }
 
 export function getClient(instanceId: string): WhatsAppClient | null {
-  return clients.get(instanceId) || null;
+  return clients.get(instanceId) ?? null;
 }

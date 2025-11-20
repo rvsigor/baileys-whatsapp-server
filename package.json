@@ -32,7 +32,6 @@
     "@types/qrcode": "^1.5.4",
     "@types/mongoose": "^5.11.97",
     "@types/redis": "^2.8.32",
-    "@types/express": "^4.17.17",
     "@types/cors": "^2.8.17",
     "@types/morgan": "^1.9.4"
   }
