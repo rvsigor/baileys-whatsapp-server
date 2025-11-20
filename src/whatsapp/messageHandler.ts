@@ -1,58 +1,45 @@
-import { WAMessage } from '@whiskeysockets/baileys';
-import { sendWebhook } from '../webhooks/sender';
-import pino from 'pino';
+import { WASocket, proto } from '@whiskeysockets/baileys';
+import axios from 'axios';
+import { config } from '../config/environment';
 
-const logger = pino();
+export async function attachMessageHandlers(sock: WASocket): Promise<void> {
+  sock.ev.on('messages.upsert', async (m: any) => {
+    try {
+      const messages = m.messages || [];
+      for (const msg of messages) {
+        if (!msg.message) continue;
 
-export async function handleIncomingMessage(
-  instanceId: string, 
-  message: WAMessage,
-  sock: any
-) {
-  try {
-    // Ignore messages from self or without key
-    if (message.key.fromMe || !message.key.remoteJid) return;
+        const from = msg.key.remoteJid;
+        const pushName = msg.pushName || msg.pushname || null;
+        const body = extractBody(msg.message);
 
-    const from = message.key.remoteJid;
-    const messageContent = message.message;
+        const payload = {
+          from,
+          body,
+          pushName,
+          id: msg.key.id,
+          timestamp: msg.messageTimestamp || msg.key.timestamp || Date.now()
+        };
 
-    if (!messageContent) return;
-
-    let text = '';
-    let mediaUrl = '';
-    let mediaType = '';
-
-    // Extract text
-    if (messageContent.conversation) {
-      text = messageContent.conversation;
-    } else if (messageContent.extendedTextMessage?.text) {
-      text = messageContent.extendedTextMessage.text;
+        if (config.webhookUrl) {
+          await axios.post(config.webhookUrl, payload).catch(err => {
+            console.error('Webhook send error:', err);
+          });
+        } else {
+          console.log('Incoming message:', payload);
+        }
+      }
+    } catch (err) {
+      console.error('Message handler error:', err);
     }
+  });
+}
 
-    // Extract media
-    if (messageContent.imageMessage) {
-      mediaType = 'image';
-      // Note: To download media, use sock.downloadMediaMessage(message)
-    } else if (messageContent.videoMessage) {
-      mediaType = 'video';
-    } else if (messageContent.audioMessage) {
-      mediaType = 'audio';
-    } else if (messageContent.documentMessage) {
-      mediaType = 'document';
-    }
-
-    // Send to webhook
-    await sendWebhook('messages.upsert', instanceId, {
-      from: from.split('@')[0], // Remove @s.whatsapp.net
-      text,
-      mediaType,
-      timestamp: message.messageTimestamp,
-      messageId: message.key.id,
-      pushName: message.pushName || ''
-    });
-
-    logger.info(`Message received in ${instanceId} from ${from}`);
-  } catch (error: any) {
-    logger.error('Error handling message:', error.message);
-  }
+function extractBody(message: any): string {
+  if (message.conversation) return message.conversation;
+  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
+  if (message.imageMessage?.caption) return message.imageMessage.caption;
+  if (message.videoMessage?.caption) return message.videoMessage.caption;
+  if (message.documentMessage?.caption) return message.documentMessage.caption;
+  return JSON.stringify(message).slice(0, 500);
 }

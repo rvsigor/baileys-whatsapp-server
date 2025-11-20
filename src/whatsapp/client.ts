@@ -1,164 +1,83 @@
-import makeWASocket, { 
-  DisconnectReason, 
-  useMultiFileAuthState, 
+import {
+  makeWASocket,
   fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore,
-  WAMessage
+  useMultiFileAuthState,
+  DisconnectReason,
+  Browsers,
+  AuthenticationState
 } from '@whiskeysockets/baileys';
-import QRCode from 'qrcode';
+import path from 'path';
 import pino from 'pino';
-import { Boom } from '@hapi/boom';
-import { saveSession, getSession, deleteSession } from '../database/mongo';
 import { cacheQR, cacheConnectionStatus } from '../redis/cache';
-import { sendWebhook } from '../webhooks/sender';
-import { handleIncomingMessage } from './messageHandler';
+import { InstanceModel } from '../database/mongo';
 
-const logger = pino({ level: 'info' });
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
-const activeSockets = new Map<string, ReturnType<typeof makeWASocket>>();
+interface WhatsAppClient {
+  instanceId: string;
+  sock: ReturnType<typeof makeWASocket> | null;
+}
 
-export async function initializeInstance(instanceId: string) {
-  try {
-    // Check if already connected
-    if (activeSockets.has(instanceId)) {
-      logger.info(`Instance ${instanceId} already active`);
-      return { success: true, message: 'Instance already connected' };
+const clients: Map<string, WhatsAppClient> = new Map();
+
+export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAppClient> {
+  if (clients.has(instanceId)) {
+    logger.info({ instanceId }, 'Instance already started');
+    return clients.get(instanceId)!;
+  }
+
+  const authDir = path.join(process.cwd(), 'data', 'auth', instanceId);
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+
+  const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 2304, 10] }));
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    browser: Browsers.ubuntu('baileys-whatsapp-server'),
+    logger
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update as any;
+    logger.info({ update }, 'connection.update');
+
+    if (qr) {
+      await cacheQR(instanceId, qr);
     }
+    if (connection === 'open') {
+      await InstanceModel.updateOne(
+        { instanceId },
+        { status: 'connected', lastSeen: new Date() },
+        { upsert: true }
+      );
+      await cacheConnectionStatus(instanceId, 'connected');
+    } else if (connection === 'close') {
+      await InstanceModel.updateOne(
+        { instanceId },
+        { status: 'disconnected', lastSeen: new Date() },
+        { upsert: true }
+      );
+      await cacheConnectionStatus(instanceId, 'disconnected');
+      const reason = (lastDisconnect?.error as any)?.output?.statusCode;
+      logger.warn({ reason }, 'connection closed');
+      // logic to reconnect if needed...
+    }
+  });
 
-    const { state, saveCreds } = await useMultiFileAuthState(`./auth_info_baileys/${instanceId}`);
-    const { version } = await fetchLatestBaileysVersion();
+  // Attach message handlers (imported from messageHandler)
+  import('../whatsapp/messageHandler').then(module => {
+    module.attachMessageHandlers(sock);
+  });
 
-    const sock = makeWASocket({
-      version,
-      logger: pino({ level: 'silent' }),
-      printQRInTerminal: false,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
-      },
-      generateHighQualityLinkPreview: true,
-    });
+  const client: WhatsAppClient = { instanceId, sock };
+  clients.set(instanceId, client);
 
-    activeSockets.set(instanceId, sock);
-
-    // QR Code handler
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        const qrBase64 = await QRCode.toDataURL(qr);
-        await cacheQR(instanceId, qrBase64);
-        await sendWebhook('qr.ready', instanceId, { qr: qrBase64 });
-        logger.info(`QR code generated for ${instanceId}`);
-      }
-
-      if (connection === 'close') {
-        const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-        
-        if (shouldReconnect) {
-          logger.info(`Reconnecting ${instanceId}...`);
-          setTimeout(() => initializeInstance(instanceId), 3000);
-        } else {
-          logger.info(`Instance ${instanceId} logged out`);
-          activeSockets.delete(instanceId);
-          await deleteSession(instanceId);
-          await sendWebhook('connection.update', instanceId, { state: 'disconnected' });
-        }
-      }
-
-      if (connection === 'open') {
-        logger.info(`Instance ${instanceId} connected!`);
-        const phoneNumber = sock.user?.id.split(':')[0];
-        await saveSession(instanceId, state, phoneNumber);
-        await cacheConnectionStatus(instanceId, 'ready');
-        await sendWebhook('connection.update', instanceId, { 
-          state: 'ready', 
-          phoneNumber 
-        });
-      }
-    });
-
-    // Save credentials on update
-    sock.ev.on('creds.update', saveCreds);
-
-    // Message handler
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type === 'notify') {
-        for (const message of messages) {
-          await handleIncomingMessage(instanceId, message, sock);
-        }
-      }
-    });
-
-    return { success: true, message: 'Instance initialized' };
-  } catch (error: any) {
-    logger.error(`Error initializing instance ${instanceId}:`, error);
-    throw error;
-  }
+  return client;
 }
 
-export async function getInstanceStatus(instanceId: string) {
-  const sock = activeSockets.get(instanceId);
-  
-  if (!sock || !sock.user) {
-    return { 
-      connected: false, 
-      status: 'disconnected' 
-    };
-  }
-
-  return {
-    connected: true,
-    status: 'ready',
-    phoneNumber: sock.user.id.split(':')[0],
-    name: sock.user.name
-  };
-}
-
-export async function sendMessage(
-  instanceId: string, 
-  to: string, 
-  message: string, 
-  media?: { url: string; type: 'image' | 'video' | 'audio' | 'document' }
-) {
-  const sock = activeSockets.get(instanceId);
-  
-  if (!sock) {
-    throw new Error('Instance not connected');
-  }
-
-  const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
-
-  if (media) {
-    const { url, type } = media;
-    const messageContent: any = {
-      caption: message
-    };
-
-    if (type === 'image') messageContent.image = { url };
-    else if (type === 'video') messageContent.video = { url };
-    else if (type === 'audio') messageContent.audio = { url };
-    else if (type === 'document') messageContent.document = { url };
-
-    await sock.sendMessage(jid, messageContent);
-  } else {
-    await sock.sendMessage(jid, { text: message });
-  }
-
-  logger.info(`Message sent from ${instanceId} to ${to}`);
-  return { success: true };
-}
-
-export async function disconnectInstance(instanceId: string) {
-  const sock = activeSockets.get(instanceId);
-  
-  if (sock) {
-    await sock.logout();
-    activeSockets.delete(instanceId);
-  }
-
-  await deleteSession(instanceId);
-  await sendWebhook('connection.update', instanceId, { state: 'disconnected' });
-  
-  return { success: true };
+export function getClient(instanceId: string): WhatsAppClient | null {
+  return clients.get(instanceId) || null;
 }

@@ -1,13 +1,8 @@
-import { Router } from 'express';
+import express, { Request, Response } from 'express';
+const router = express.Router();
 
-const router = Router();
-
-router.get('/', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
-  });
+router.get('/', (req: Request, res: Response) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
 export default router;

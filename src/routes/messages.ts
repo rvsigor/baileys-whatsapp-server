@@ -1,24 +1,35 @@
-import { Router } from 'express';
-import { sendMessage } from '../whatsapp/client';
+import express, { Request, Response } from 'express';
+import { body, validationResult } from 'express-validator';
+import { getClient } from '../whatsapp/client';
 
-const router = Router();
+const router = express.Router();
 
-router.post('/send', async (req, res) => {
-  try {
-    const { instanceId, to, message, media } = req.body;
-    
-    if (!instanceId || !to || !message) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'instanceId, to, and message are required' 
-      });
+/**
+ * POST /messages/send
+ * body: { instanceId: string, to: string, message: string }
+ */
+router.post(
+  '/send',
+  body('instanceId').isString().notEmpty(),
+  body('to').isString().notEmpty(),
+  body('message').isString().notEmpty(),
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { instanceId, to, message } = req.body;
+    const client = getClient(instanceId);
+    if (!client || !client.sock) return res.status(400).json({ error: 'instance not connected' });
+
+    try {
+      const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+      const result = await client.sock.sendMessage(jid, { text: message });
+      return res.json({ ok: true, result });
+    } catch (err: any) {
+      console.error(err);
+      return res.status(500).json({ error: err.message || 'send failed' });
     }
-
-    await sendMessage(instanceId, to, message, media);
-    res.json({ success: true });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
   }
-});
+);
 
 export default router;
