@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
@@ -23,8 +23,8 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// API key middleware
-app.use((req, res, next) => {
+// API key middleware com tipos explícitos
+app.use((req: Request, res: Response, next: NextFunction) => {
   const key = req.headers['x-api-key'] || req.query.api_key;
   if (String(key) !== config.apiKey) {
     return res.status(401).json({ error: 'unauthorized' });

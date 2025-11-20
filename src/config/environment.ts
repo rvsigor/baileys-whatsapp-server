@@ -7,6 +7,7 @@ export const config = {
   redisUrl: process.env.REDIS_URL || '',
   apiKey: process.env.API_KEY || '',
   webhookUrl: process.env.WEBHOOK_URL || '',
+  webhookSecret: process.env.WEBHOOK_SECRET || '', // adicionado
   rateLimitWindowMs: process.env.RATE_LIMIT_WINDOW_MS
     ? Number(process.env.RATE_LIMIT_WINDOW_MS)
     : 60000,

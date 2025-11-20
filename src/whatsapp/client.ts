@@ -4,7 +4,8 @@ import {
   useMultiFileAuthState,
   DisconnectReason,
   Browsers,
-  AuthenticationState
+  AuthenticationState,
+  WAVersion
 } from '@whiskeysockets/baileys';
 import path from 'path';
 import pino from 'pino';
@@ -31,8 +32,11 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
 
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 2304, 10] }));
 
+  // garante que a versão tenha o tipo correto
+  const waVersion: WAVersion = Array.isArray(version) ? (version as [number, number, number]) : version;
+
   const sock = makeWASocket({
-    version,
+    version: waVersion,
     auth: state,
     browser: Browsers.ubuntu('baileys-whatsapp-server'),
     logger
@@ -44,9 +48,8 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
     const { connection, lastDisconnect, qr } = update as any;
     logger.info({ update }, 'connection.update');
 
-    if (qr) {
-      await cacheQR(instanceId, qr);
-    }
+    if (qr) await cacheQR(instanceId, qr);
+
     if (connection === 'open') {
       await InstanceModel.updateOne(
         { instanceId },
@@ -63,11 +66,9 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
       await cacheConnectionStatus(instanceId, 'disconnected');
       const reason = (lastDisconnect?.error as any)?.output?.statusCode;
       logger.warn({ reason }, 'connection closed');
-      // logic to reconnect if needed...
     }
   });
 
-  // Attach message handlers (imported from messageHandler)
   import('../whatsapp/messageHandler').then(module => {
     module.attachMessageHandlers(sock);
   });
