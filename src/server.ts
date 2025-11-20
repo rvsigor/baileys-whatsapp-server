@@ -315,5 +315,5 @@ app.post('/api/disconnect/:instanceName', async (req: Request, res: Response) =>
 });
 
 app.listen(PORT, () => {
-  logger.info(`Baileys WhatsApp Server running on port ${PORT}`);
+  logger.info(`Your Baileys WhatsApp Server running on port ${PORT}`);
 });
