@@ -6,6 +6,7 @@ const logger = pino();
 
 let redisClient: ReturnType<typeof createClient> | null = null;
 
+// Conexão Redis
 export async function connectRedis() {
   if (!config.redisUrl) {
     logger.warn('⚠️ Redis URL not configured, skipping Redis connection');
@@ -14,7 +15,7 @@ export async function connectRedis() {
 
   try {
     redisClient = createClient({ url: config.redisUrl });
-    redisClient.on('error', (err) => logger.error('Redis error:', err));
+    redisClient.on('error', (err: Error) => logger.error('Redis error:', err));
     await redisClient.connect();
     logger.info('✅ Redis connected');
   } catch (error) {
@@ -23,6 +24,7 @@ export async function connectRedis() {
   }
 }
 
+// QR Code
 export async function cacheQR(instanceId: string, qr: string, ttl: number = 60) {
   if (!redisClient) return;
   await redisClient.set(`qr:${instanceId}`, qr, { EX: ttl });
@@ -33,6 +35,7 @@ export async function getQR(instanceId: string): Promise<string | null> {
   return await redisClient.get(`qr:${instanceId}`);
 }
 
+// Status da conexão
 export async function cacheConnectionStatus(instanceId: string, status: string) {
   if (!redisClient) return;
   await redisClient.set(`status:${instanceId}`, status, { EX: 300 });
