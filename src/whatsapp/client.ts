@@ -81,3 +81,12 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
 export function getClient(instanceId: string): WhatsAppClient | null {
   return clients.get(instanceId) ?? null;
 }
+
+export function removeClient(instanceId: string): void {
+  const client = clients.get(instanceId);
+  if (client?.sock) {
+    client.sock.end(undefined);
+  }
+  clients.delete(instanceId);
+  logger.info({ instanceId }, 'Cliente removido');
+}

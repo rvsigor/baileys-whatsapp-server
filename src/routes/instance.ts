@@ -1,7 +1,9 @@
 import express, { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { startWhatsAppInstance, getClient } from '../whatsapp/client';
+import { startWhatsAppInstance, getClient, removeClient } from '../whatsapp/client';
 import { InstanceModel } from '../database/mongo';
+import { getQR } from '../redis/cache'; // Já existe no seu código
+
 
 const router = express.Router();
 
@@ -48,7 +50,7 @@ router.get(
   async (req: Request, res: Response) => {
     const { instanceId } = req.params;
     try {
-      const qr = await getQRFromRedis(instanceId); // Buscar do Redis
+      const qr = await getQR(instanceId); // Buscar do Redis
       if (!qr) {
         return res.status(404).json({ error: 'QR not found. Start instance first.' });
       }
