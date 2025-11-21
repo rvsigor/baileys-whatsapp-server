@@ -42,4 +42,41 @@ router.get(
   }
 );
 
+// GET /instance/qr/:instanceId
+router.get(
+  '/qr/:instanceId',
+  async (req: Request, res: Response) => {
+    const { instanceId } = req.params;
+    try {
+      const qr = await getQRFromRedis(instanceId); // Buscar do Redis
+      if (!qr) {
+        return res.status(404).json({ error: 'QR not found. Start instance first.' });
+      }
+      return res.json({ instanceId, qr });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// POST /instance/disconnect
+router.post(
+  '/disconnect',
+  body('instanceId').isString().trim().notEmpty(),
+  async (req: Request, res: Response) => {
+    const { instanceId } = req.body;
+    try {
+      const client = getClient(instanceId);
+      if (client?.sock) {
+        await client.sock.logout();
+      }
+      removeClient(instanceId); // Função para remover do Map
+      await InstanceModel.updateOne({ instanceId }, { status: 'disconnected' });
+      return res.json({ ok: true, message: 'disconnected' });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+);
+
 export default router;
