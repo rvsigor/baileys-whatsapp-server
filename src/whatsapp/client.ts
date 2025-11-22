@@ -1,6 +1,7 @@
 import {
   makeWASocket,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   useMultiFileAuthState,
   Browsers,
   WAVersion
@@ -65,15 +66,13 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
     
     console.log('[client] connection.update:', { connection, hasQr: !!qr, isNewLogin });
 
-    // ✅ NOVO: Salvar credenciais imediatamente após login bem-sucedido
+    // ✅ Salvar credenciais imediatamente após login bem-sucedido
     if (isNewLogin && connection !== 'close') {
       console.log('[client] New login detected - ensuring credentials are saved');
       try {
-        // Forçar salvamento das credenciais
-        await sock.authState.saveCreds();
+        await saveCreds(); // ✅ Usar saveCreds local
         console.log('[client] Credentials saved successfully after new login');
         
-        // Atualizar status no MongoDB para 'authenticated'
         await InstanceModel.findOneAndUpdate(
           { instanceId },
           { 
@@ -88,12 +87,10 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
       }
     }
 
-    // Salvar QR no Redis quando disponível
     if (qr) {
       console.log('[client] QR code generated');
       await cacheQR(instanceId, qr);
       
-      // Atualizar status para 'qr_ready'
       await InstanceModel.findOneAndUpdate(
         { instanceId },
         { 
@@ -108,7 +105,6 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
     if (connection === 'open') {
       console.log('[client] WhatsApp connected');
       
-      // Salvar número do telefone
       const phoneNumber = sock.user?.id.split(':')[0];
       if (phoneNumber) {
         await InstanceModel.findOneAndUpdate(
@@ -126,7 +122,7 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
 
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-      const shouldReconnect = statusCode !== 401; // Não reconectar em erro de autenticação
+      const shouldReconnect = statusCode !== 401;
       
       console.log('[client] Connection closed', { 
         statusCode, 
@@ -146,8 +142,7 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
             } 
           }
         );
-        // Não remover do Map, permitir reconexão automática
-        return;
+        return; // Não remover do Map
       }
 
       if (shouldReconnect) {
@@ -161,10 +156,9 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
             } 
           }
         );
-        // Permitir que o Baileys reconecte automaticamente
       } else {
         console.log('[client] Removing client - auth failure');
-        clientsMap.delete(instanceId);
+        clients.delete(instanceId); // ✅ Usar 'clients' não 'clientsMap'
         await InstanceModel.findOneAndUpdate(
           { instanceId },
           { 
@@ -177,9 +171,15 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
       }
     }
 
-    // Enviar webhook para todas as atualizações
-    await sendWebhook(instanceId, 'connection.update', update);
+    // ✅ CORREÇÃO: Enviar webhook com payload completo
+    await sendWebhook({
+      event: "connection.update",
+      instance: instanceId,
+      data: update,
+      timestamp: new Date().toISOString()
+    });
   });
+
 
   import('./messageHandler').then(module => {
     module.attachMessageHandlers(sock,instanceId);
