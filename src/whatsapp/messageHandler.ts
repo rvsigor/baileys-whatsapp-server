@@ -1,6 +1,7 @@
 import { WASocket } from '@whiskeysockets/baileys';
 import axios from 'axios';
 import { config } from '../config/environment';
+import { sendWebhook } from "../webhooks/sender";
 
 export async function attachMessageHandlers(sock: WASocket, instanceName: string): Promise<void> {
   sock.ev.on('messages.upsert', async (m: any) => {

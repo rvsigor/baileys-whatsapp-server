@@ -9,6 +9,7 @@ import path from 'path';
 import pino from 'pino';
 import { cacheQR, cacheConnectionStatus } from '../redis/cache';
 import { InstanceModel } from '../database/mongo';
+import { sendWebhook } from "../webhooks/sender";
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
