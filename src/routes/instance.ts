@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { startWhatsAppInstance, getClient, removeClient } from '../whatsapp/client';
 import { InstanceModel } from '../database/mongo';
 import { getQR } from '../redis/cache'; // Já existe no seu código
-
+import path from 'path';
 
 const router = express.Router();
 
@@ -145,5 +145,55 @@ router.post('/force-delete', async (req: Request, res: Response) => {
     message: 'Instance forcefully deleted' 
   });
 });
+
+// POST /instance/clear-session
+router.post(
+  '/clear-session',
+  body('instanceId').isString().trim().notEmpty(),
+  async (req: Request, res: Response) => {
+    const { instanceId } = req.body;
+    
+    console.log(`[clear-session] Clearing auth data for: ${instanceId}`);
+    
+    // 1. Remover do Map
+    try {
+      removeClient(instanceId);
+    } catch (error) {
+      console.error('[clear-session] removeClient error:', error);
+    }
+    
+    // 2. Deletar pasta de autenticação
+    const authDir = path.join(process.cwd(), 'data', 'auth', instanceId);
+    try {
+      const fs = await import('fs/promises');
+      await fs.rm(authDir, { recursive: true, force: true });
+      console.log(`[clear-session] Auth folder deleted: ${authDir}`);
+    } catch (error) {
+      console.error('[clear-session] Failed to delete auth folder:', error);
+    }
+    
+    // 3. Atualizar banco
+    try {
+      await InstanceModel.updateOne(
+        { instanceId },
+        { status: 'disconnected' }
+      );
+    } catch (error) {
+      console.error('[clear-session] DB update error:', error);
+    }
+    
+    // 4. Limpar Redis (se você armazenar QR/status lá)
+    try {
+      // Adicione aqui se você tiver função para limpar Redis
+    } catch (error) {
+      console.error('[clear-session] Redis clear error:', error);
+    }
+    
+    return res.json({ 
+      ok: true, 
+      message: 'Session cleared successfully' 
+    });
+  }
+);
 
 export default router;
