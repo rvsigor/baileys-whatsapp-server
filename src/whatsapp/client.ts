@@ -51,7 +51,7 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
     // Enviar webhook para cada atualização de conexão
     await sendWebhook({
       event: 'connection.update',
-      instance: instanceName, // ou instanceId
+      instance: instanceId, // ou instanceId
       data: {
         connection,
         lastDisconnect: lastDisconnect ? {
@@ -77,7 +77,7 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
   });
 
   import('./messageHandler').then(module => {
-    module.attachMessageHandlers(sock);
+    module.attachMessageHandlers(sock,instanceId);
   });
 
   const client = { instanceId, sock };

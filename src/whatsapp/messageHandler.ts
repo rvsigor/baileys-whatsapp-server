@@ -3,7 +3,7 @@ import axios from 'axios';
 import { config } from '../config/environment';
 import { sendWebhook } from "../webhooks/sender";
 
-export async function attachMessageHandlers(sock: WASocket, instanceName: string): Promise<void> {
+export async function attachMessageHandlers(sock: WASocket, instanceId: string): Promise<void> {
   sock.ev.on('messages.upsert', async (m: any) => {
     try {
       const messages = m.messages ?? [];
@@ -17,7 +17,7 @@ export async function attachMessageHandlers(sock: WASocket, instanceName: string
         // Usar sendWebhook em vez de axios.post direto
         await sendWebhook({
           event: 'messages.upsert',
-          instance: instanceName,
+          instance: instanceId,
           data: {
             from,
             body,
