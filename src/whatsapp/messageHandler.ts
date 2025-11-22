@@ -2,7 +2,7 @@ import { WASocket } from '@whiskeysockets/baileys';
 import axios from 'axios';
 import { config } from '../config/environment';
 
-export async function attachMessageHandlers(sock: WASocket): Promise<void> {
+export async function attachMessageHandlers(sock: WASocket, instanceName: string): Promise<void> {
   sock.ev.on('messages.upsert', async (m: any) => {
     try {
       const messages = m.messages ?? [];
@@ -13,21 +13,21 @@ export async function attachMessageHandlers(sock: WASocket): Promise<void> {
         const pushName = msg.pushName ?? msg.pushname ?? null;
         const body = getMessageBody(msg.message);
 
-        const payload = {
-          from,
-          body,
-          pushName,
-          id: msg.key.id,
-          timestamp: msg.messageTimestamp ?? msg.key.timestamp ?? Date.now()
-        };
-
-        if (config.webhookUrl) {
-          await axios.post(config.webhookUrl, payload).catch(err => {
-            console.error('Erro ao enviar webhook:', err);
-          });
-        } else {
-          console.log('Mensagem recebida:', payload);
-        }
+        // Usar sendWebhook em vez de axios.post direto
+        await sendWebhook({
+          event: 'messages.upsert',
+          instance: instanceName,
+          data: {
+            from,
+            body,
+            pushName,
+            id: msg.key.id,
+            timestamp: msg.messageTimestamp ?? msg.key.timestamp ?? Date.now(),
+            // Opcional: incluir mensagem completa se necessário
+            // fullMessage: msg
+          },
+          timestamp: new Date().toISOString()
+        });
       }
     } catch (err) {
       console.error('Erro no messageHandler:', err);

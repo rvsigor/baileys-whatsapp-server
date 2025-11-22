@@ -42,30 +42,36 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', async (update: any) => {
+  sock.ev.on('connection.update', async (update) => {
+    console.log('connection.update:', update);
+
     const { connection, lastDisconnect, qr } = update;
-    logger.info({ update }, 'connection.update');
 
-    if (qr) {
-      await cacheQR(instanceId, qr);
-    }
+    // Enviar webhook para cada atualização de conexão
+    await sendWebhook({
+      event: 'connection.update',
+      instance: instanceName, // ou instanceId
+      data: {
+        connection,
+        lastDisconnect: lastDisconnect ? {
+          error: lastDisconnect.error?.message,
+          statusCode: (lastDisconnect.error as any)?.output?.statusCode
+        } : undefined,
+        qr
+      },
+      timestamp: new Date().toISOString()
+    });
 
-    if (connection === 'open') {
-      await InstanceModel.updateOne(
-        { instanceId },
-        { status: 'connected', lastSeen: new Date() },
-        { upsert: true }
-      );
-      await cacheConnectionStatus(instanceId, 'connected');
-    } else if (connection === 'close') {
-      await InstanceModel.updateOne(
-        { instanceId },
-        { status: 'disconnected', lastSeen: new Date() },
-        { upsert: true }
-      );
-      await cacheConnectionStatus(instanceId, 'disconnected');
-      const reason = (lastDisconnect?.error as any)?.output?.statusCode;
-      logger.warn({ reason }, 'Conexão fechada');
+    // Lógica de reconexão (se já não existir)
+    if (connection === 'close') {
+      const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== 401;
+      console.log('Conexão fechada. Reconectar?', shouldReconnect);
+      
+      if (shouldReconnect) {
+        // Sua lógica de reconexão aqui
+      }
+    } else if (connection === 'open') {
+      console.log('Conexão aberta com sucesso');
     }
   });
 
