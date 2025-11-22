@@ -114,41 +114,36 @@ router.post(
 );
 
 // POST /instance/force-delete
-router.post(
-  '/force-delete',
-  body('instanceId').isString().trim().notEmpty(),
-  async (req: Request, res: Response) => {
-    const { instanceId } = req.body;
-    
-    console.log(`[force-delete] Forcefully deleting instance: ${instanceId}`);
-    
-    // Remover do Map sem tentar logout
-    try {
-      removeClient(instanceId);
-      console.log(`[force-delete] Client removed from Map: ${instanceId}`);
-    } catch (error) {
-      console.error(`[force-delete] removeClient error:`, error);
-    }
-    
-    // Atualizar status no banco
-    try {
-      await InstanceModel.updateOne(
-        { instanceId }, 
-        { status: 'disconnected' }
-      );
-    } catch (error) {
-      console.error(`[force-delete] DB update error:`, error);
-    }
-    
-    // Limpar arquivos de sessão (se você salvar em disco)
-    // await fs.rm(`./sessions/${instanceId}`, { recursive: true, force: true });
-    
-    return res.json({ 
-      ok: true, 
-      message: 'Instance forcefully deleted' 
-    });
+router.post('/force-delete', async (req: Request, res: Response) => {
+  const { instanceId } = req.body;
+  
+  // Validação manual
+  if (!instanceId || typeof instanceId !== 'string') {
+    return res.status(400).json({ error: 'instanceId is required' });
   }
-);
-
+  
+  console.log(`[force-delete] Forcefully deleting instance: ${instanceId}`);
+  
+  try {
+    removeClient(instanceId);
+    console.log(`[force-delete] Client removed from Map: ${instanceId}`);
+  } catch (error) {
+    console.error(`[force-delete] removeClient error:`, error);
+  }
+  
+  try {
+    await InstanceModel.updateOne(
+      { instanceId }, 
+      { status: 'disconnected' }
+    );
+  } catch (error) {
+    console.error(`[force-delete] DB update error:`, error);
+  }
+  
+  return res.json({ 
+    ok: true, 
+    message: 'Instance forcefully deleted' 
+  });
+});
 
 export default router;

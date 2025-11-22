@@ -34,6 +34,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log(`[request] ${req.method} ${req.path}`);
+  console.log(`[request] Body:`, JSON.stringify(req.body));
+  console.log(`[request] Headers:`, JSON.stringify(req.headers));
+  next();
+});
+
 app.use('/instance', instanceRoutes);
 app.use('/messages', messagesRoutes);
 app.use('/health', healthRoutes);

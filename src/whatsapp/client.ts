@@ -44,14 +44,54 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
-    console.log('connection.update:', update);
+    console.log('[client] connection.update:', JSON.stringify(update));
 
     const { connection, lastDisconnect, qr } = update;
 
-    // Enviar webhook para cada atualização de conexão
+    // 1. Salvar QR no Redis quando gerado
+    if (qr) {
+      console.log('[client] QR code generated, saving to Redis');
+      await cacheQR(instanceId, qr);
+      
+      // Atualizar status para "qr_ready"
+      await InstanceModel.updateOne(
+        { instanceId },
+        { status: 'qr_ready' },
+        { upsert: true }
+      );
+      await cacheConnectionStatus(instanceId, 'qr_ready');
+    }
+
+    // 2. Atualizar status quando conexão muda
+    if (connection === 'open') {
+      console.log('[client] Connection opened successfully');
+      await InstanceModel.updateOne(
+        { instanceId },
+        { status: 'open' },
+        { upsert: true }
+      );
+      await cacheConnectionStatus(instanceId, 'open');
+    } else if (connection === 'close') {
+      console.log('[client] Connection closed');
+      const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== 401;
+      
+      await InstanceModel.updateOne(
+        { instanceId },
+        { status: 'disconnected' },
+        { upsert: true }
+      );
+      await cacheConnectionStatus(instanceId, 'disconnected');
+      
+      if (shouldReconnect) {
+        console.log('[client] Will attempt reconnect');
+        // Lógica de reconexão
+      }
+    }
+
+    // 3. Enviar webhook (já existente)
     await sendWebhook({
       event: 'connection.update',
-      instance: instanceId, // ou instanceId
+      instance: instanceId,
       data: {
         connection,
         lastDisconnect: lastDisconnect ? {
@@ -62,18 +102,6 @@ export async function startWhatsAppInstance(instanceId: string): Promise<WhatsAp
       },
       timestamp: new Date().toISOString()
     });
-
-    // Lógica de reconexão (se já não existir)
-    if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== 401;
-      console.log('Conexão fechada. Reconectar?', shouldReconnect);
-      
-      if (shouldReconnect) {
-        // Sua lógica de reconexão aqui
-      }
-    } else if (connection === 'open') {
-      console.log('Conexão aberta com sucesso');
-    }
   });
 
   import('./messageHandler').then(module => {
