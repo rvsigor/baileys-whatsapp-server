@@ -108,7 +108,7 @@ router.post(
     return res.json({ 
       ok: true, 
       message: 'disconnected',
-      logoutError: logoutError ? logoutError.message : null
+      logoutError: logoutError instanceof Error ? logoutError.message : String(logoutError)
     });
   }
 );
