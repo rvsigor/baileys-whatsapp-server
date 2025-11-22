@@ -67,18 +67,88 @@ router.post(
   body('instanceId').isString().trim().notEmpty(),
   async (req: Request, res: Response) => {
     const { instanceId } = req.body;
+    
+    let logoutError = null;
+    
     try {
       const client = getClient(instanceId);
       if (client?.sock) {
-        await client.sock.logout();
+        try {
+          await client.sock.logout();
+          console.log(`[disconnect] Logout successful for ${instanceId}`);
+        } catch (err) {
+          console.log(`[disconnect] Logout error for ${instanceId}:`, err);
+          logoutError = err;
+          // ✅ NÃO LANÇA O ERRO - continua para remover do Map
+        }
       }
-      removeClient(instanceId); // Função para remover do Map
-      await InstanceModel.updateOne({ instanceId }, { status: 'disconnected' });
-      return res.json({ ok: true, message: 'disconnected' });
-    } catch (error: any) {
-      return res.status(500).json({ error: error.message });
+    } catch (error) {
+      console.error(`[disconnect] getClient error for ${instanceId}:`, error);
     }
+    
+    // ✅ SEMPRE remove do Map, independente de erros acima
+    try {
+      removeClient(instanceId);
+      console.log(`[disconnect] Client removed from Map: ${instanceId}`);
+    } catch (error) {
+      console.error(`[disconnect] removeClient error:`, error);
+    }
+    
+    // ✅ SEMPRE atualiza status no banco
+    try {
+      await InstanceModel.updateOne(
+        { instanceId }, 
+        { status: 'disconnected' }
+      );
+    } catch (error) {
+      console.error(`[disconnect] DB update error:`, error);
+    }
+    
+    // ✅ SEMPRE retorna sucesso (200), mesmo se logout falhou
+    return res.json({ 
+      ok: true, 
+      message: 'disconnected',
+      logoutError: logoutError ? logoutError.message : null
+    });
   }
 );
+
+// POST /instance/force-delete
+router.post(
+  '/force-delete',
+  body('instanceId').isString().trim().notEmpty(),
+  async (req: Request, res: Response) => {
+    const { instanceId } = req.body;
+    
+    console.log(`[force-delete] Forcefully deleting instance: ${instanceId}`);
+    
+    // Remover do Map sem tentar logout
+    try {
+      removeClient(instanceId);
+      console.log(`[force-delete] Client removed from Map: ${instanceId}`);
+    } catch (error) {
+      console.error(`[force-delete] removeClient error:`, error);
+    }
+    
+    // Atualizar status no banco
+    try {
+      await InstanceModel.updateOne(
+        { instanceId }, 
+        { status: 'disconnected' }
+      );
+    } catch (error) {
+      console.error(`[force-delete] DB update error:`, error);
+    }
+    
+    // Limpar arquivos de sessão (se você salvar em disco)
+    // await fs.rm(`./sessions/${instanceId}`, { recursive: true, force: true });
+    
+    return res.json({ 
+      ok: true, 
+      message: 'Instance forcefully deleted' 
+    });
+  }
+);
+
 
 export default router;
